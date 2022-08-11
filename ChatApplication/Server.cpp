@@ -1,4 +1,5 @@
 #include "Server.h"
+#include "ChatPacketHeader.h"
 #include <iostream>
 #include <assert.h> 
 
@@ -17,6 +18,8 @@ bool Server::Start()
 		2      /* allow up to 2 channels to be used, 0 and 1 */,
 		0      /* assume any amount of incoming bandwidth */,
 		0      /* assume any amount of outgoing bandwidth */);
+
+	ChatPacket::TestSerialize();
 
 	if (m_server != nullptr)
 	{
@@ -47,17 +50,17 @@ void Server::ProcessPackets()
 			case ENET_EVENT_TYPE_RECEIVE:
 				// no user data, broadcast the packet
 				if (event.peer->data == NULL)
-				{
-					cout << "boardcast: " << event.packet->data << endl;
-					{
-						// Relay the message to all clients
-						ENetPacket* packet = enet_packet_create((char*)event.packet->data,
-							event.packet->dataLength,
-							ENET_PACKET_FLAG_RELIABLE);
-						// Send over channel 1
-						enet_host_broadcast(m_server, 1, packet);
-						enet_host_flush(m_server);
-					}
+				{	
+					ChatPacket chatPacket;
+					((char*)event.packet->data) >> chatPacket;
+					cout << "boardcast: " << chatPacket.userName << ": " << chatPacket.message << endl;
+					// Relay the message to all clients
+					ENetPacket* packet = enet_packet_create(event.packet->data,
+						event.packet->dataLength,
+						ENET_PACKET_FLAG_RELIABLE);
+					// Send over channel 0 (no particular reason)
+					enet_host_broadcast(m_server, 1, packet);
+					enet_host_flush(m_server);
 					enet_packet_destroy(event.packet);
 					enet_host_flush(m_server);
 				}
@@ -67,13 +70,16 @@ void Server::ProcessPackets()
 					for (int i = 0; i < m_server->connectedPeers; i++) 
 					{	
 						ENetPeer* peer = m_server->peers + i;
-						if (peer != event.peer)
+						if (peer != event.peer) 
 						{
-							cout << "send peer[" << event.peer->connectID << "]:" << event.packet->data << endl;
-							ENetPacket* packet = enet_packet_create((char*)event.packet->data,
+							ChatPacket chatPacket;
+							((char*)event.packet->data) >> chatPacket;
+							cout << "send peer[" << event.peer->connectID << "]:" << chatPacket.userName << ": " << chatPacket.message << endl;
+							ENetPacket* packet = enet_packet_create(event.packet->data,
 								event.packet->dataLength,
 								ENET_PACKET_FLAG_RELIABLE);
-							enet_peer_send(peer, 1, packet);
+							// Send over channel 1 (no particular reason)
+							enet_peer_send(peer, 1, packet); 
 							enet_host_flush(m_server);
 						}
 					}

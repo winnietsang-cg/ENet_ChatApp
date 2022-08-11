@@ -1,4 +1,5 @@
 #include "Client.h"
+#include <time.h>
 #include <iostream>
 
 using namespace std;
@@ -15,6 +16,8 @@ bool Client::Connect()
 	{
 		cout << "1) Enter User Name: ";
 		cin >> m_UserName;
+		srand((unsigned int)time(0));
+		m_UserColor = rand() % 5 + 10; // random number 10-15
 
 		ENetAddress address;
 		ENetEvent event;
@@ -32,6 +35,8 @@ bool Client::Connect()
 		if (enet_host_service(m_client, &event, 5000) > 0 && event.type == ENET_EVENT_TYPE_CONNECT)
 		{
 			cout << "Connection to 127.0.0.1:1234 succeeded." << endl;
+			
+			
 			return true;
 		}
 		else
@@ -49,6 +54,8 @@ bool Client::Connect()
 void Client::Start()
 {
 	cout << "Start Chat (Type \"Q\" to quit)" << endl;
+
+	// Process user input and packet receive independently of main loop
 	m_UserInputThread = std::thread(&Client::GetUserMessage, this);
 	m_PacketThread = std::thread(&Client::ProcessPackets, this);
 
@@ -59,7 +66,16 @@ void Client::Start()
 			std::lock_guard<std::mutex> lock(m_ReceiveMessageMutex);
 			while(!m_ReceiveMessages.empty())
 			{
-				cout << endl << m_ReceiveMessages.front() << endl;
+				const ChatPacket& cp = m_ReceiveMessages.front();
+				HANDLE hConsole = GetStdHandle(STD_OUTPUT_HANDLE);
+				SetConsoleTextAttribute(hConsole, cp.consoleColor);
+				// Move the cursor back to delete the ">"
+				CONSOLE_SCREEN_BUFFER_INFO csbi;
+				GetConsoleScreenBufferInfo(hConsole, &csbi);
+				csbi.dwCursorPosition.X = 0;
+				SetConsoleCursorPosition(hConsole, csbi.dwCursorPosition);
+				cout << cp.userName << ": " << cp.message << endl;
+				SetConsoleTextAttribute(hConsole, m_UserColor);
 				cout << ">"; // prompt for input
 				m_ReceiveMessages.pop();
 			}
@@ -72,18 +88,24 @@ void Client::Start()
 				auto& m = m_UserMessage.front();
 				if (m.length() > 0)
 				{
-					string userMessage = m_UserName + ": " + m;
-					ENetPacket* packet = enet_packet_create(userMessage.c_str(),
-						userMessage.length() + 1,
-						ENET_PACKET_FLAG_RELIABLE);
+					ChatPacket cp;
+					cp.userName = m_UserName;
+					cp.consoleColor = m_UserColor;
+					cp.message = m;
+					char* buffer = new char[cp.size()];
+					size_t buffersize = buffer << cp;
+					ENetPacket* packet = enet_packet_create(buffer,	buffersize,	ENET_PACKET_FLAG_RELIABLE);
 					enet_host_broadcast(m_client, 0, packet);
 					enet_host_flush(m_client);
+					delete[] buffer;
 				}
 				m_UserMessage.pop();
 			}
 		}
 	}}
 
+// This thread monitor the network for packet and queue them up in m_ReceiveMessages
+// Main loop will print them to console
 void Client::ProcessPackets()
 {
 	while (!m_quit)
@@ -98,9 +120,9 @@ void Client::ProcessPackets()
 				{
 					// cout << "receive[" << event.peer->connectID << "]:" << event.packet->data << endl;
 					std::lock_guard<std::mutex> lock(m_ReceiveMessageMutex);
-					std::string message;
-					message = (char*)event.packet->data;
-					m_ReceiveMessages.push(message);					
+					ChatPacket cp;
+					((char*)event.packet->data) >> cp;
+					m_ReceiveMessages.push(cp);					
 					/* Clean up the packet now that we're done using it. */
 					enet_packet_destroy(event.packet);
 				}
@@ -109,20 +131,27 @@ void Client::ProcessPackets()
 	}
 }
 
+// This thread monitor cin for user input, and queue them up in m_UserMessage
+// Main loop will send them off to the network
 void Client::GetUserMessage()
 {
 	while (!m_quit)
 	{	
-		std::string input;
+		HANDLE hConsole = GetStdHandle(STD_OUTPUT_HANDLE);
+		SetConsoleTextAttribute(hConsole, m_UserColor);
 		cout << ">"; // prompt for input
+		std::string input;
 		std::getline(std::cin, input);
 		if (input == "quit")
 		{ 
 			m_quit=true;
 			return;
 		}
-		std::lock_guard<std::mutex> lock(m_UserMessageMutex);
-		m_UserMessage.push(input);
+		if (input.length() > 0)
+		{
+			std::lock_guard<std::mutex> lock(m_UserMessageMutex);
+			m_UserMessage.push(input);
+		}
 	}
 }
 

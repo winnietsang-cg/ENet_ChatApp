@@ -4,6 +4,7 @@
 #include <thread>
 #include <queue>
 #include <mutex>
+#include "ChatPacketHeader.h"
 
 using namespace std;
 
@@ -19,9 +20,10 @@ public:
 private:
 	ENetHost* m_client = nullptr;
 	ENetPeer* m_peer = nullptr;
+	unsigned char m_UserColor; 
 	std::string m_UserName;
 	std::queue<std::string> m_UserMessage;
-	std::queue<std::string> m_ReceiveMessages;
+	std::queue<ChatPacket> m_ReceiveMessages;
 	std::thread m_UserInputThread;
 	std::thread m_PacketThread;
 
